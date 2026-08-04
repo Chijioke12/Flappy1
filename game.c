@@ -10,12 +10,74 @@
  */
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_image.h>
-#include <SDL2/SDL_mixer.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
 #include <time.h>
 #include <math.h>
+
+typedef struct {
+    Uint8 *buffer;
+    Uint32 length;
+} SoundEffect;
+
+#define MAX_PLAYING_SOUNDS 8
+
+typedef struct {
+    SoundEffect snd;
+    Uint32 play_cursor;
+    bool active;
+} PlayingSound;
+
+PlayingSound playing_sounds[MAX_PLAYING_SOUNDS];
+SDL_AudioDeviceID audio_device = 0;
+
+void audio_callback(void *userdata, Uint8 *stream, int len) {
+    SDL_memset(stream, 0, len);
+    for (int i = 0; i < MAX_PLAYING_SOUNDS; i++) {
+        if (!playing_sounds[i].active) continue;
+        Uint32 remaining = playing_sounds[i].snd.length - playing_sounds[i].play_cursor;
+        Uint32 bytes_to_write = (Uint32)len < remaining ? (Uint32)len : remaining;
+        SDL_MixAudioFormat(stream, playing_sounds[i].snd.buffer + playing_sounds[i].play_cursor, AUDIO_S16LSB, bytes_to_write, SDL_MIX_MAXVOLUME);
+        playing_sounds[i].play_cursor += bytes_to_write;
+        if (playing_sounds[i].play_cursor >= playing_sounds[i].snd.length) {
+            playing_sounds[i].active = false;
+        }
+    }
+}
+
+SoundEffect load_sound(const char* path, SDL_AudioSpec *target_spec) {
+    SoundEffect snd = {NULL, 0};
+    SDL_AudioSpec wav_spec;
+    Uint8 *wav_buffer;
+    Uint32 wav_length;
+    
+    if (SDL_LoadWAV(path, &wav_spec, &wav_buffer, &wav_length) == NULL) {
+        printf("Failed to load WAV %s: %s\n", path, SDL_GetError());
+        return snd;
+    }
+    
+    SDL_AudioCVT cvt;
+    if (SDL_BuildAudioCVT(&cvt, wav_spec.format, wav_spec.channels, wav_spec.freq,
+                          target_spec->format, target_spec->channels, target_spec->freq) > 0) {
+        cvt.len = wav_length;
+        cvt.buf = (Uint8 *)SDL_malloc(cvt.len * cvt.len_mult);
+        SDL_memcpy(cvt.buf, wav_buffer, wav_length);
+        
+        if (SDL_ConvertAudio(&cvt) == 0) {
+            snd.buffer = cvt.buf;
+            snd.length = cvt.len_cvt;
+        } else {
+            printf("Failed to convert audio for %s\n", path);
+            SDL_free(cvt.buf);
+        }
+        SDL_FreeWAV(wav_buffer);
+    } else {
+        snd.buffer = wav_buffer;
+        snd.length = wav_length;
+    }
+    return snd;
+}
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -48,7 +110,7 @@ SDL_Window *window = NULL;
 SDL_Renderer *renderer = NULL;
 SDL_Texture *tex_bird[3];
 SDL_Texture *tex_pipe_top, *tex_pipe_bottom, *tex_bg_day, *tex_base;
-Mix_Chunk *snd_wing, *snd_point, *snd_hit, *snd_die;
+SoundEffect snd_wing, snd_point, snd_hit, snd_die;
 
 GameState state = STATE_MENU;
 float bird_y = 150;
@@ -99,8 +161,21 @@ void spawn_pipe() {
     }
 }
 
-void play_sound(Mix_Chunk *chunk) {
-    if (chunk) Mix_PlayChannel(-1, chunk, 0);
+void play_sound(SoundEffect snd) {
+    if (!snd.buffer || snd.length == 0 || audio_device == 0) return;
+    SDL_LockAudioDevice(audio_device);
+    int slot = -1;
+    for (int i = 0; i < MAX_PLAYING_SOUNDS; i++) {
+        if (!playing_sounds[i].active) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot == -1) slot = 0;
+    playing_sounds[slot].snd = snd;
+    playing_sounds[slot].play_cursor = 0;
+    playing_sounds[slot].active = true;
+    SDL_UnlockAudioDevice(audio_device);
 }
 
 bool check_collision(float bx, float by, Pipe *p) {
@@ -293,8 +368,20 @@ int main(int argc, char* argv[]) {
     if (!(IMG_Init(IMG_INIT_PNG) & IMG_INIT_PNG)) {
         printf("IMG_Init failed\n");
     }
-    if (Mix_OpenAudio(22050, MIX_DEFAULT_FORMAT, 2, 1024) < 0) {
-        printf("Mix_OpenAudio failed, continuing without sound\n");
+    SDL_AudioSpec want, have;
+    SDL_memset(&want, 0, sizeof(want));
+    want.freq = 44100;
+    want.format = AUDIO_S16LSB;
+    want.channels = 1;
+    want.samples = 1024;
+    want.callback = audio_callback;
+    want.userdata = NULL;
+
+    audio_device = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
+    if (audio_device == 0) {
+        printf("SDL_OpenAudioDevice failed: %s, continuing without sound\n", SDL_GetError());
+    } else {
+        SDL_PauseAudioDevice(audio_device, 0);
     }
 
     window = SDL_CreateWindow("Flappy Bird KaiOS", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, SCREEN_W, SCREEN_H, 0);
@@ -309,10 +396,10 @@ int main(int argc, char* argv[]) {
     tex_bg_day = load_texture("assets/background_day.png");
     tex_base = load_texture("assets/base.png");
 
-    snd_wing = Mix_LoadWAV("assets/sounds/wing.wav");
-    snd_point = Mix_LoadWAV("assets/sounds/point.wav");
-    snd_hit = Mix_LoadWAV("assets/sounds/hit.wav");
-    snd_die = Mix_LoadWAV("assets/sounds/die.wav");
+    snd_wing = load_sound("assets/sounds/wing.wav", &have);
+    snd_point = load_sound("assets/sounds/point.wav", &have);
+    snd_hit = load_sound("assets/sounds/hit.wav", &have);
+    snd_die = load_sound("assets/sounds/die.wav", &have);
 
     reset_game();
     last_frame_time = SDL_GetTicks();
