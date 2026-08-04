@@ -156,11 +156,32 @@ void main_loop() {
 
 int main(int argc, char* argv[]) {
     srand(time(NULL));
-    SDL_Init(SDL_INIT_VIDEO);
-    IMG_Init(IMG_INIT_PNG);
+    if (SDL_Init(SDL_INIT_VIDEO) < 0) {
+        printf("SDL could not initialize! SDL_Error: %s\n", SDL_GetError());
+        return 1;
+    }
+
+    if (!(IMG_Init(IMG_INIT_PNG) & IMG_INIT_PNG)) {
+        printf("SDL_image could not initialize! SDL_image Error: %s\n", IMG_GetError());
+    }
 
     window = SDL_CreateWindow("Flappy Bird C", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, SCREEN_WIDTH, SCREEN_HEIGHT, 0);
-    renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+    if (!window) {
+        printf("Window could not be created! SDL_Error: %s\n", SDL_GetError());
+        return 1;
+    }
+
+    // Try hardware acceleration first, fallback to software
+    renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    if (!renderer) {
+        printf("Warning: Accelerated renderer failed, trying software. Error: %s\n", SDL_GetError());
+        renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
+    }
+
+    if (!renderer) {
+        printf("Renderer could not be created! SDL Error: %s\n", SDL_GetError());
+        return 1;
+    }
 
     load_textures();
     init_game();

@@ -16,7 +16,9 @@ export default function GameRunner() {
 
     const runGame = async () => {
       try {
-        // 1. Setup Emscripten Module
+        // 2. Setup Emscripten Module
+        const dataBuffer = Uint8Array.from(atob(GameData.GAME_DATA!), c => c.charCodeAt(0));
+        
         (window as any).Module = {
           canvas: canvasRef.current,
           print: (text: string) => console.log('emcc:', text),
@@ -26,39 +28,28 @@ export default function GameRunner() {
           },
           setStatus: (text: string) => {
             if (!text) setLoading(false);
-          }
-        };
+          },
+          preRun: [() => {
+            const Mod = (window as any).Module;
+            // Ensure the directory exists
+            try {
+              Mod.FS.mkdir('/assets');
+            } catch (e) {}
 
-        // 2. Decode and inject data
-        const dataBuffer = Uint8Array.from(atob(GameData.GAME_DATA!), c => c.charCodeAt(0));
-        (window as any).Module.preRun = [() => {
-           (window as any).Module.FS.writeFile('game.data', dataBuffer);
-        }];
+            // If we have game.data, we should technically let Emscripten handle it
+            // But since we are manually injecting, we can also manually write individual files
+            // if we had them. For now, writing game.data to the root is what the loader expects
+            // if it was loaded via XHR. 
+            if (Mod.FS && dataBuffer) {
+              Mod.FS.writeFile('game.data', dataBuffer);
+            }
+          }]
+        };
 
         // 3. Inject JS
         const script = document.createElement('script');
         script.id = 'emscripten-game-js';
         script.textContent = atob(GameData.GAME_JS!);
-
-        // Special handling for FS initialization
-        const originalPreRun = (window as any).Module.preRun || [];
-        (window as any).Module.preRun = [
-          ...originalPreRun,
-          () => {
-            const Mod = (window as any).Module;
-            if (Mod.FS && dataBuffer) {
-              try {
-                Mod.FS.writeFile('game.data', dataBuffer);
-                console.log('Successfully injected game.data into FS');
-              } catch (e) {
-                console.error('Failed to write game.data:', e);
-              }
-            } else {
-              console.warn('FS or dataBuffer missing during preRun');
-            }
-          }
-        ];
-
         document.body.appendChild(script);
 
       } catch (err: any) {
@@ -68,6 +59,18 @@ export default function GameRunner() {
     };
 
     runGame();
+
+    return () => {
+      if ((window as any).Module) {
+        try {
+          (window as any).Module.pauseMainLoop?.();
+          (window as any).Module.exit?.();
+        } catch (e) {}
+        delete (window as any).Module;
+      }
+      const script = document.getElementById('emscripten-game-js');
+      if (script) script.remove();
+    };
   }, []);
 
   if (error) {
