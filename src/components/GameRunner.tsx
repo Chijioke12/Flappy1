@@ -37,7 +37,28 @@ export default function GameRunner() {
 
         // 3. Inject JS
         const script = document.createElement('script');
+        script.id = 'emscripten-game-js';
         script.textContent = atob(GameData.GAME_JS!);
+
+        // Special handling for FS initialization
+        const originalPreRun = (window as any).Module.preRun || [];
+        (window as any).Module.preRun = [
+          ...originalPreRun,
+          () => {
+            const Mod = (window as any).Module;
+            if (Mod.FS && dataBuffer) {
+              try {
+                Mod.FS.writeFile('game.data', dataBuffer);
+                console.log('Successfully injected game.data into FS');
+              } catch (e) {
+                console.error('Failed to write game.data:', e);
+              }
+            } else {
+              console.warn('FS or dataBuffer missing during preRun');
+            }
+          }
+        ];
+
         document.body.appendChild(script);
 
       } catch (err: any) {
