@@ -15,10 +15,11 @@ export default function App() {
   const GRAVITY = 0.25;
   const JUMP_STRENGTH = -4.5;
   const PIPE_SPEED = 2;
-  const PIPE_GAP = 100;
+  const PIPE_GAP = 90;
+  const GROUND_Y = 260;
 
   useEffect(() => {
-    if (!gameStarted || gameOver) return;
+    if (!gameStarted || gameOver || mode !== 'sim') return;
 
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -28,9 +29,9 @@ export default function App() {
     let birdY = SCREEN_HEIGHT / 2;
     let birdV = 0;
     let pipes = [
+      { x: 240, top: 100, scored: false },
       { x: 400, top: 150, scored: false },
-      { x: 600, top: 200, scored: false },
-      { x: 800, top: 100, scored: false }
+      { x: 560, top: 80, scored: false }
     ];
     let currentScore = 0;
 
@@ -41,7 +42,7 @@ export default function App() {
       birdV += GRAVITY;
       birdY += birdV;
 
-      if (birdY < 0 || birdY > SCREEN_HEIGHT - 20) {
+      if (birdY < 0 || birdY + 24 > GROUND_Y) {
         setGameOver(true);
         return;
       }
@@ -49,13 +50,14 @@ export default function App() {
       pipes = pipes.map(p => ({ ...p, x: p.x - PIPE_SPEED }));
       if (pipes[0].x < -52) {
         pipes.shift();
-        pipes.push({ x: pipes[pipes.length - 1].x + 200, top: Math.random() * 200 + 100, scored: false });
+        pipes.push({ x: pipes[pipes.length - 1].x + 160, top: Math.random() * 120 + 40, scored: false });
       }
 
       // Collision & Score
       pipes.forEach(p => {
-        if (p.x < 50 + 34 && p.x + 52 > 50) {
-          if (birdY < p.top || birdY + 24 > p.top + PIPE_GAP) {
+        // Simple bounding box with some padding
+        if (50 + 34 - 4 > p.x && 50 + 4 < p.x + 52) {
+          if (birdY + 4 < p.top || birdY + 24 - 4 > p.top + PIPE_GAP) {
             setGameOver(true);
           }
         }
@@ -67,26 +69,50 @@ export default function App() {
       });
 
       // Render
-      ctx.fillStyle = '#70C5CE'; // Sky Blue
+      const grad = ctx.createLinearGradient(0, 0, 0, SCREEN_HEIGHT);
+      grad.addColorStop(0, '#70C5CE');
+      grad.addColorStop(1, '#DEF3FF');
+      ctx.fillStyle = grad;
       ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
 
       // Pipes
-      ctx.fillStyle = '#22c55e'; // Green
       pipes.forEach(p => {
+        ctx.fillStyle = '#73BF2E';
         ctx.fillRect(p.x, 0, 52, p.top);
-        ctx.fillRect(p.x, p.top + PIPE_GAP, 52, SCREEN_HEIGHT);
+        ctx.fillRect(p.x, p.top + PIPE_GAP, 52, GROUND_Y - (p.top + PIPE_GAP));
+        
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(p.x, 0, 52, p.top);
+        ctx.strokeRect(p.x, p.top + PIPE_GAP, 52, GROUND_Y - (p.top + PIPE_GAP));
       });
 
+      // Ground
+      ctx.fillStyle = '#DED895';
+      ctx.fillRect(0, GROUND_Y, SCREEN_WIDTH, SCREEN_HEIGHT - GROUND_Y);
+      ctx.fillStyle = '#7ED321';
+      ctx.fillRect(0, GROUND_Y, SCREEN_WIDTH, 12);
+      ctx.strokeStyle = '#000';
+      ctx.strokeRect(0, GROUND_Y, SCREEN_WIDTH, SCREEN_HEIGHT - GROUND_Y);
+
       // Bird
-      ctx.fillStyle = '#fbbf24'; // Yellow
-      ctx.fillRect(50, birdY, 34, 24);
+      ctx.save();
+      ctx.translate(50 + 17, birdY + 12);
+      let angle = birdV * 5;
+      if (angle > 30) angle = 30;
+      if (angle < -30) angle = -30;
+      ctx.rotate(angle * Math.PI / 180);
+      ctx.fillStyle = '#fbbf24';
+      ctx.fillRect(-17, -12, 34, 24);
+      ctx.strokeRect(-17, -12, 34, 24);
+      ctx.restore();
 
       animationFrameId = requestAnimationFrame(loop);
     };
 
     loop();
     return () => cancelAnimationFrame(animationFrameId);
-  }, [gameStarted, gameOver]);
+  }, [gameStarted, gameOver, mode]);
 
   const handleAction = () => {
     if (gameOver) {

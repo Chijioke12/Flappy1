@@ -15,7 +15,7 @@
 #define BIRD_HEIGHT 24
 #define PIPE_WIDTH 52
 #define PIPE_HEIGHT 320
-#define PIPE_GAP 100
+#define PIPE_GAP 90
 #define GRAVITY 0.25
 #define JUMP_STRENGTH -4.5
 #define PIPE_SPEED 2
@@ -45,14 +45,17 @@ int score = 0;
 bool game_over = false;
 bool started = false;
 
+// The ground level y-coordinate
+const int GROUND_Y = 260;
+
 void init_game() {
     bird.x = 50;
     bird.y = SCREEN_HEIGHT / 2;
     bird.velocity = 0;
     
     for (int i = 0; i < 3; i++) {
-        pipes[i].x = SCREEN_WIDTH + i * 200;
-        pipes[i].top_height = rand() % 200 + 50;
+        pipes[i].x = SCREEN_WIDTH + i * 160;
+        pipes[i].top_height = rand() % 120 + 40;
         pipes[i].scored = false;
     }
     score = 0;
@@ -94,7 +97,8 @@ void update() {
     bird.velocity += GRAVITY;
     bird.y += bird.velocity;
 
-    if (bird.y < 0 || bird.y + BIRD_HEIGHT > 400) {
+    // Collision with ceiling and ground
+    if (bird.y < 0 || bird.y + BIRD_HEIGHT > GROUND_Y) {
         game_over = true;
     }
 
@@ -103,13 +107,13 @@ void update() {
 
         if (pipes[i].x + PIPE_WIDTH < 0) {
             pipes[i].x = SCREEN_WIDTH + 100;
-            pipes[i].top_height = rand() % 200 + 50;
+            pipes[i].top_height = rand() % 120 + 40;
             pipes[i].scored = false;
         }
 
         // Collision detection
-        if (bird.x + BIRD_WIDTH > pipes[i].x && bird.x < pipes[i].x + PIPE_WIDTH) {
-            if (bird.y < pipes[i].top_height || bird.y + BIRD_HEIGHT > pipes[i].top_height + PIPE_GAP) {
+        if (bird.x + BIRD_WIDTH - 4 > pipes[i].x && bird.x + 4 < pipes[i].x + PIPE_WIDTH) {
+            if (bird.y + 4 < pipes[i].top_height || bird.y + BIRD_HEIGHT - 4 > pipes[i].top_height + PIPE_GAP) {
                 game_over = true;
             }
         }
@@ -117,7 +121,6 @@ void update() {
         if (!pipes[i].scored && pipes[i].x + PIPE_WIDTH < bird.x) {
             score++;
             pipes[i].scored = true;
-            printf("Score: %d\n", score);
         }
     }
 }
@@ -130,20 +133,25 @@ void render_game() {
 
     // Pipes
     for (int i = 0; i < 3; i++) {
+        // Draw top pipe (cap at bottom of its segment)
         SDL_Rect top_rect = { (int)pipes[i].x, 0, PIPE_WIDTH, pipes[i].top_height };
         SDL_RenderCopy(renderer, pipe_top_texture, NULL, &top_rect);
 
-        SDL_Rect bottom_rect = { (int)pipes[i].x, pipes[i].top_height + PIPE_GAP, PIPE_WIDTH, SCREEN_HEIGHT - (pipes[i].top_height + PIPE_GAP) };
+        // Draw bottom pipe (cap at top of its segment)
+        SDL_Rect bottom_rect = { (int)pipes[i].x, pipes[i].top_height + PIPE_GAP, PIPE_WIDTH, GROUND_Y - (pipes[i].top_height + PIPE_GAP) };
         SDL_RenderCopy(renderer, pipe_bottom_texture, NULL, &bottom_rect);
     }
 
     // Base
-    SDL_Rect base_rect = { 0, 400, SCREEN_WIDTH, 112 };
+    SDL_Rect base_rect = { 0, GROUND_Y, SCREEN_WIDTH, SCREEN_HEIGHT - GROUND_Y };
     SDL_RenderCopy(renderer, base_texture, NULL, &base_rect);
 
     // Bird
     SDL_Rect bird_rect = { (int)bird.x, (int)bird.y, BIRD_WIDTH, BIRD_HEIGHT };
-    SDL_RenderCopyEx(renderer, bird_texture, NULL, &bird_rect, bird.velocity * 5, NULL, SDL_FLIP_NONE);
+    float angle = bird.velocity * 5;
+    if (angle > 30) angle = 30;
+    if (angle < -30) angle = -30;
+    SDL_RenderCopyEx(renderer, bird_texture, NULL, &bird_rect, angle, NULL, SDL_FLIP_NONE);
 
     SDL_RenderPresent(renderer);
 }

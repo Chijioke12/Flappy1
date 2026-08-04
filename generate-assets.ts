@@ -108,9 +108,9 @@ async function generateAssets() {
     return canvas;
   };
 
-  const drawPipe = (isTop: boolean, width = 104, height = 640) => {
-    const capH = 42;
-    const capW = width + 16;
+  const drawPipe = (isTop: boolean, width = 52, height = 320) => {
+    const capH = 24;
+    const capW = width + 8;
     const over = (capW - width) / 2;
     const canvas = createCanvas(capW, height);
     const ctx = canvas.getContext('2d');
@@ -120,7 +120,7 @@ async function generateAssets() {
     const GREEN_LIGHT = '#A8E94F';
     const OUTLINE = '#000000';
 
-    ctx.lineWidth = 4;
+    ctx.lineWidth = 2;
     ctx.strokeStyle = OUTLINE;
 
     if (isTop) {
@@ -128,34 +128,43 @@ async function generateAssets() {
       ctx.fillStyle = GREEN;
       ctx.fillRect(over, 0, width, height - capH);
       ctx.strokeRect(over, 0, width, height - capH);
-      // Cap
+      // Cap at the bottom
       ctx.fillRect(0, height - capH, capW, capH);
       ctx.strokeRect(0, height - capH, capW, capH);
+      // Detail lines
+      ctx.fillStyle = GREEN_LIGHT;
+      ctx.fillRect(over + 4, 0, 6, height - capH);
     } else {
-      // Cap
+      // Cap at the top
       ctx.fillStyle = GREEN;
       ctx.fillRect(0, 0, capW, capH);
       ctx.strokeRect(0, 0, capW, capH);
       // Body
       ctx.fillRect(over, capH, width, height - capH);
       ctx.strokeRect(over, capH, width, height - capH);
+      // Detail lines
+      ctx.fillStyle = GREEN_LIGHT;
+      ctx.fillRect(over + 4, capH, 6, height - capH);
     }
 
     return canvas;
   };
 
-  const drawBase = (width = 240, height = 112) => {
+  const drawBase = (width = 240, height = 60) => {
     const canvas = createCanvas(width, height);
     const ctx = canvas.getContext('2d');
+    
+    // Ground
     ctx.fillStyle = '#DED895';
-    ctx.fillRect(0, 20, width, height - 20);
+    ctx.fillRect(0, 12, width, height - 12);
+    
+    // Grass top
+    ctx.fillStyle = '#7ED321';
+    ctx.fillRect(0, 0, width, 12);
+    
     ctx.strokeStyle = '#000';
     ctx.lineWidth = 2;
-    ctx.strokeRect(0, 20, width, height - 20);
-    
-    ctx.fillStyle = '#7ED321';
-    ctx.fillRect(0, 0, width, 24);
-    ctx.strokeRect(0, 0, width, 24);
+    ctx.strokeRect(0, 0, width, height);
     
     return canvas;
   };
@@ -168,6 +177,20 @@ async function generateAssets() {
     grad.addColorStop(1, '#DEF3FF');
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, w, h);
+
+    // Add some clouds
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+    const drawCloud = (x: number, y: number) => {
+      ctx.beginPath();
+      ctx.arc(x, y, 20, 0, Math.PI * 2);
+      ctx.arc(x + 15, y - 10, 25, 0, Math.PI * 2);
+      ctx.arc(x + 35, y, 20, 0, Math.PI * 2);
+      ctx.fill();
+    };
+    drawCloud(40, 60);
+    drawCloud(180, 40);
+    drawCloud(100, 100);
+
     return canvas;
   };
 
