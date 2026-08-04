@@ -1,19 +1,21 @@
 import { useState, useEffect, useRef } from 'preact/hooks';
-import { Bird, Play, RefreshCw, Github, FileCode, Package, Layers } from 'lucide-react';
+import { Bird, Play, RefreshCw, Github, FileCode, Package, Layers, Cpu, Monitor } from 'lucide-react';
+import GameRunner from './components/GameRunner';
 
 export default function App() {
   const [score, setScore] = useState(0);
   const [gameOver, setGameOver] = useState(false);
   const [gameStarted, setGameStarted] = useState(false);
+  const [mode, setMode] = useState<'sim' | 'native'>('sim');
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   // Constants matching the C implementation
-  const SCREEN_WIDTH = 288;
-  const SCREEN_HEIGHT = 512;
+  const SCREEN_WIDTH = 240;
+  const SCREEN_HEIGHT = 320;
   const GRAVITY = 0.25;
-  const JUMP_STRENGTH = -5.0;
+  const JUMP_STRENGTH = -4.5;
   const PIPE_SPEED = 2;
-  const PIPE_GAP = 120;
+  const PIPE_GAP = 100;
 
   useEffect(() => {
     if (!gameStarted || gameOver) return;
@@ -99,51 +101,74 @@ export default function App() {
   return (
     <div className="container">
       <div className="game-container">
-        <div className="game-canvas-wrapper">
-          <canvas 
-            ref={canvasRef} 
-            width={SCREEN_WIDTH} 
-            height={SCREEN_HEIGHT}
-            onClick={handleAction}
-            style={{ cursor: 'pointer', width: '100%', height: '100%' }}
-          />
-          
-          {!gameStarted && (
-            <div className="overlay">
-              <Bird size={64} style={{ marginBottom: '16px' }} />
-              <h1>Flappy C</h1>
-              <p style={{ color: 'white', opacity: 0.8, marginBottom: '24px' }}>Preview Simulation</p>
-              <button 
-                onClick={() => setGameStarted(true)}
-                className="btn"
-                style={{ backgroundColor: '#22c55e', borderRadius: '999px' }}
-              >
-                <Play size={20} fill="currentColor" /> START
-              </button>
-            </div>
-          )}
+        <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', background: '#f3f4f6', padding: '4px', borderRadius: '8px' }}>
+          <button 
+            onClick={() => setMode('sim')}
+            className={`btn ${mode === 'sim' ? '' : 'btn-ghost'}`}
+            style={{ padding: '8px 16px', backgroundColor: mode === 'sim' ? '#000' : 'transparent', color: mode === 'sim' ? '#fff' : '#666', borderRadius: '6px' }}
+          >
+            <Monitor size={16} /> SIM
+          </button>
+          <button 
+            onClick={() => setMode('native')}
+            className={`btn ${mode === 'native' ? '' : 'btn-ghost'}`}
+            style={{ padding: '8px 16px', backgroundColor: mode === 'native' ? '#000' : 'transparent', color: mode === 'native' ? '#fff' : '#666', borderRadius: '6px' }}
+          >
+            <Cpu size={16} /> NATIVE (asm.js)
+          </button>
+        </div>
 
-          {gameOver && (
-            <div className="overlay" style={{ background: 'rgba(0,0,0,0.7)' }}>
-              <h2 style={{ color: '#ef4444', fontSize: '2.5rem', fontWeight: 900, marginBottom: '8px' }}>GAME OVER</h2>
-              <div style={{ fontSize: '3rem', fontWeight: 900, marginBottom: '32px' }}>{score}</div>
-              <button 
-                onClick={() => { setGameOver(false); setScore(0); setGameStarted(true); }}
-                className="btn"
-                style={{ backgroundColor: '#ffffff', color: '#000000', borderRadius: '999px' }}
-              >
-                <RefreshCw size={20} /> RESTART
-              </button>
-            </div>
-          )}
+        <div className="game-canvas-wrapper" style={{ width: '240px', height: '320px' }}>
+          {mode === 'sim' ? (
+            <>
+              <canvas 
+                ref={canvasRef} 
+                width={SCREEN_WIDTH} 
+                height={SCREEN_HEIGHT}
+                onClick={handleAction}
+                style={{ cursor: 'pointer', width: '100%', height: '100%' }}
+              />
+              
+              {!gameStarted && (
+                <div className="overlay">
+                  <Bird size={48} style={{ marginBottom: '12px' }} />
+                  <h1 style={{ fontSize: '1.5rem' }}>Flappy C</h1>
+                  <p style={{ color: 'white', opacity: 0.8, marginBottom: '16px', fontSize: '0.75rem' }}>Preview Simulation</p>
+                  <button 
+                    onClick={() => setGameStarted(true)}
+                    className="btn"
+                    style={{ backgroundColor: '#22c55e', borderRadius: '999px', padding: '8px 20px' }}
+                  >
+                    <Play size={16} fill="currentColor" /> START
+                  </button>
+                </div>
+              )}
 
-          <div className="score-display">
-            {score}
-          </div>
+              {gameOver && (
+                <div className="overlay" style={{ background: 'rgba(0,0,0,0.7)' }}>
+                  <h2 style={{ color: '#ef4444', fontSize: '1.5rem', fontWeight: 900, marginBottom: '8px' }}>GAME OVER</h2>
+                  <div style={{ fontSize: '2rem', fontWeight: 900, marginBottom: '16px' }}>{score}</div>
+                  <button 
+                    onClick={() => { setGameOver(false); setScore(0); setGameStarted(true); }}
+                    className="btn"
+                    style={{ backgroundColor: '#ffffff', color: '#000000', borderRadius: '999px', padding: '8px 20px' }}
+                  >
+                    <RefreshCw size={16} /> RESTART
+                  </button>
+                </div>
+              )}
+
+              <div className="score-display" style={{ top: '16px', fontSize: '3rem' }}>
+                {score}
+              </div>
+            </>
+          ) : (
+            <GameRunner />
+          )}
         </div>
         
         <p style={{ marginTop: '16px', color: '#666', fontSize: '0.875rem', fontStyle: 'italic' }}>
-          Click the game area to jump (Simulation)
+          {mode === 'sim' ? 'Click simulation area to jump' : 'Compiled C code (KaiOS Target)'}
         </p>
       </div>
 
@@ -187,7 +212,7 @@ export default function App() {
             </h2>
             <div className="badge-container">
               <span className="badge badge-blue">asm.js (ES5)</span>
-              <span className="badge badge-green">SDL2 / SDL2_Image</span>
+              <span className="badge badge-green">240 x 320 px</span>
               <span className="badge badge-purple">Firefox 48 / KaiOS</span>
             </div>
           </section>

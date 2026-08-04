@@ -33,8 +33,8 @@ async function generateAssets() {
     createPlaceholder('bird_down.png', 34, 24, 0xFFFF00FF),
     createPlaceholder('pipe_top.png', 52, 320, 0x00FF00FF), // Green
     createPlaceholder('pipe_bottom.png', 52, 320, 0x00FF00FF),
-    createPlaceholder('base.png', 336, 112, 0xDED895FF), // Ground color
-    createPlaceholder('background_day.png', 288, 512, 0x70C5CEFF), // Sky blue
+    createPlaceholder('base.png', 240, 112, 0xDED895FF), // Ground color
+    createPlaceholder('background_day.png', 240, 320, 0x70C5CEFF), // Sky blue
   ]);
 
   console.log('Fallback assets generated in', assetsDir);

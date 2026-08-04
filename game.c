@@ -9,15 +9,15 @@
 #include <emscripten.h>
 #endif
 
-#define SCREEN_WIDTH 288
-#define SCREEN_HEIGHT 512
+#define SCREEN_WIDTH 240
+#define SCREEN_HEIGHT 320
 #define BIRD_WIDTH 34
 #define BIRD_HEIGHT 24
 #define PIPE_WIDTH 52
 #define PIPE_HEIGHT 320
 #define PIPE_GAP 100
 #define GRAVITY 0.25
-#define JUMP_STRENGTH -5.0
+#define JUMP_STRENGTH -4.5
 #define PIPE_SPEED 2
 
 typedef struct {
