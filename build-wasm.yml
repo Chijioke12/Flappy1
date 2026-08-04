@@ -1,0 +1,69 @@
+name: Build C to asm.js
+
+on:
+  push:
+    branches: [ "**" ]
+  pull_request:
+    branches: [ "**" ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Generate assets
+        run: npx tsx generate-assets.ts
+
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: '1.38.47'
+          actions-cache-folder: 'emsdk-cache'
+
+      - name: Compile game.c to asm.js for Firefox 48
+        run: |
+          mkdir -p build
+          # -s WASM=0 forces compilation to asm.js instead of WebAssembly
+          # Using Emscripten 1.38.47 outputs native ES5 asm.js fully compatible with Firefox 48 (KaiOS 2.5)
+          emcc game.c -O2 -s WASM=0 -s LEGACY_VM_SUPPORT=1 -s ENVIRONMENT='web' -s USE_SDL=2 -s USE_SDL_IMAGE=2 -s SDL2_IMAGE_FORMATS='["png"]' --preload-file public/assets@/assets -s ALLOW_MEMORY_GROWTH=1 -o build/game.js
+          
+          # Update public assets, memory initializer & base64 bundle
+          cp build/game.js public/game.js
+          cp build/game.data public/game.data
+          if [ -f build/game.js.mem ]; then cp build/game.js.mem public/game.js.mem; fi
+          node convert.js
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: game-asmjs
+          path: |
+            build/game.js
+            build/game.data
+            build/*.mem
+            public/game.js
+            public/game.data
+            public/*.mem
+            src/gameData.ts
+
+      - name: Commit and push generated files
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add public/game.js public/game.data src/gameData.ts
+          git add public/game.js.mem 2>/dev/null || true
+          git diff-index --quiet HEAD || (git commit -m "Auto-compile C to asm.js (Firefox 48 / KaiOS) with memory initializer" && git push)

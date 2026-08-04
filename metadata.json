@@ -1,0 +1,6 @@
+{
+  "name": "Preact App",
+  "description": "A lightweight and fast Preact application with custom styling and no Tailwind CSS.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
