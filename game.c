@@ -1,205 +1,328 @@
+
+/*
+ * Flappy Bird for KaiOS - Written in C
+ * Targets: 
+ *   1. Desktop (SDL2) for testing: gcc flappy.c -lSDL2 -lSDL2_image -lSDL2_mixer -lm
+ *   2. KaiOS (WASM) via Emscripten: emcc flappy.c -s USE_SDL=2 -s USE_SDL_IMAGE=2 -s SDL2_IMAGE_FORMATS='["png"]' -s USE_SDL_MIXER=2 -s USE_SDL_MIXER_FORMATS='["wav"]' -o flappy.js
+ *
+ * KaiOS screen: 240x320, keys: ArrowUp/Enter = flap, SoftLeft = restart
+ * Uses your Python-generated assets in assets/ folder
+ */
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_image.h>
+#include <SDL2/SDL_mixer.h>
 #include <stdio.h>
-#include <stdbool.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <time.h>
+#include <math.h>
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
 #endif
 
-#define SCREEN_WIDTH 240
-#define SCREEN_HEIGHT 320
-#define BIRD_WIDTH 34
-#define BIRD_HEIGHT 24
-#define PIPE_WIDTH 52
-#define PIPE_HEIGHT 320
-#define PIPE_GAP 90
-#define GRAVITY 0.25
-#define JUMP_STRENGTH -4.5
-#define PIPE_SPEED 2
+#define SCREEN_W 240
+#define SCREEN_H 320
+#define BIRD_X 50
+#define BIRD_W 34
+#define BIRD_H 24
+#define PIPE_W 52
+#define PIPE_GAP 85
+#define PIPE_SPEED 1.8f
+#define GRAVITY 0.28f
+#define FLAP_POWER -5.2f
+#define BASE_H 28
+#define PIPE_SPAWN_INTERVAL 1500 // ms
+#define MAX_PIPES 4
 
-typedef struct {
-    float x, y;
-    float velocity;
-} Bird;
+typedef enum { STATE_MENU, STATE_PLAYING, STATE_GAMEOVER } GameState;
 
 typedef struct {
     float x;
-    int top_height;
+    float gap_y;
     bool scored;
+    bool active;
 } Pipe;
 
-SDL_Window* window = NULL;
-SDL_Renderer* renderer = NULL;
-SDL_Texture* bird_texture = NULL;
-SDL_Texture* pipe_top_texture = NULL;
-SDL_Texture* pipe_bottom_texture = NULL;
-SDL_Texture* bg_texture = NULL;
-SDL_Texture* base_texture = NULL;
+SDL_Window *window = NULL;
+SDL_Renderer *renderer = NULL;
+SDL_Texture *tex_bird[3];
+SDL_Texture *tex_pipe_top, *tex_pipe_bottom, *tex_bg_day, *tex_base;
+Mix_Chunk *snd_wing, *snd_point, *snd_hit, *snd_die;
 
-Bird bird;
-Pipe pipes[3];
+GameState state = STATE_MENU;
+float bird_y = 150;
+float bird_vel = 0;
+int bird_frame = 0;
+Uint32 last_frame_time = 0;
+Uint32 last_pipe_spawn = 0;
+float base_scroll = 0;
 int score = 0;
-bool game_over = false;
-bool started = false;
+int best_score = 0;
+Pipe pipes[MAX_PIPES];
+int pipe_index = 0;
 
-// The ground level y-coordinate
-const int GROUND_Y = 260;
-
-void init_game() {
-    bird.x = 50;
-    bird.y = SCREEN_HEIGHT / 2;
-    bird.velocity = 0;
-    
-    for (int i = 0; i < 3; i++) {
-        pipes[i].x = SCREEN_WIDTH + i * 160;
-        pipes[i].top_height = rand() % 120 + 40;
-        pipes[i].scored = false;
+SDL_Texture* load_texture(const char* path) {
+    SDL_Surface *surf = IMG_Load(path);
+    if (!surf) {
+        printf("Failed to load %s: %s\n", path, IMG_GetError());
+        return NULL;
     }
-    score = 0;
-    game_over = false;
-    started = false;
+    SDL_Texture *tex = SDL_CreateTextureFromSurface(renderer, surf);
+    SDL_FreeSurface(surf);
+    return tex;
 }
 
-void load_textures() {
-    bg_texture = IMG_LoadTexture(renderer, "assets/background_day.png");
-    bird_texture = IMG_LoadTexture(renderer, "assets/bird_mid.png");
-    pipe_top_texture = IMG_LoadTexture(renderer, "assets/pipe_top.png");
-    pipe_bottom_texture = IMG_LoadTexture(renderer, "assets/pipe_bottom.png");
-    base_texture = IMG_LoadTexture(renderer, "assets/base.png");
-    
-    if (!bg_texture || !bird_texture || !pipe_top_texture || !pipe_bottom_texture || !base_texture) {
-        printf("Failed to load textures! Error: %s\n", IMG_GetError());
+void reset_game() {
+    bird_y = SCREEN_H / 2 - 50;
+    bird_vel = 0;
+    score = 0;
+    base_scroll = 0;
+    last_pipe_spawn = SDL_GetTicks();
+    for (int i=0;i<MAX_PIPES;i++) pipes[i].active = false;
+    pipe_index = 0;
+}
+
+void spawn_pipe() {
+    // find inactive pipe
+    for (int i=0;i<MAX_PIPES;i++) {
+        if (!pipes[i].active) {
+            pipes[i].x = SCREEN_W + 10;
+            // random gap_y between 60 and SCREEN_H - BASE_H - PIPE_GAP - 60
+            int min_gap = 50;
+            int max_gap = SCREEN_H - BASE_H - PIPE_GAP - 50;
+            pipes[i].gap_y = min_gap + rand() % (max_gap - min_gap);
+            pipes[i].scored = false;
+            pipes[i].active = true;
+            break;
+        }
     }
+}
+
+void play_sound(Mix_Chunk *chunk) {
+    if (chunk) Mix_PlayChannel(-1, chunk, 0);
+}
+
+bool check_collision(float bx, float by, Pipe *p) {
+    // bird rect
+    SDL_Rect bird_rect = {(int)bx, (int)by, BIRD_W-6, BIRD_H-4};
+    SDL_Rect top_rect = {(int)p->x, 0, PIPE_W, (int)p->gap_y};
+    SDL_Rect bottom_rect = {(int)p->x, (int)(p->gap_y + PIPE_GAP), PIPE_W, SCREEN_H};
+    return SDL_HasIntersection(&bird_rect, &top_rect) || SDL_HasIntersection(&bird_rect, &bottom_rect);
 }
 
 void handle_input() {
     SDL_Event e;
     while (SDL_PollEvent(&e)) {
         if (e.type == SDL_QUIT) {
+#ifdef __EMSCRIPTEN__
+            emscripten_cancel_main_loop();
+#endif
             exit(0);
-        } else if (e.type == SDL_KEYDOWN || e.type == SDL_FINGERDOWN || e.type == SDL_MOUSEBUTTONDOWN) {
-            if (game_over) {
-                init_game();
-            } else {
-                bird.velocity = JUMP_STRENGTH;
-                started = true;
+        }
+        if (e.type == SDL_KEYDOWN) {
+            // KaiOS keys: Up, Enter, SoftLeft (F1), SoftRight (F2)
+            // Desktop: Space, Up, W
+            if (e.key.keysym.sym == SDLK_UP || e.key.keysym.sym == SDLK_SPACE || 
+                e.key.keysym.sym == SDLK_w || e.key.keysym.sym == SDLK_RETURN ||
+                e.key.keysym.sym == SDLK_KP_ENTER) {
+                if (state == STATE_MENU) {
+                    state = STATE_PLAYING;
+                    reset_game();
+                } else if (state == STATE_PLAYING) {
+                    bird_vel = FLAP_POWER;
+                    play_sound(snd_wing);
+                } else if (state == STATE_GAMEOVER) {
+                    state = STATE_MENU;
+                }
             }
+            if (e.key.keysym.sym == SDLK_F1 || e.key.keysym.sym == SDLK_ESCAPE) { // SoftLeft = restart
+                if (state == STATE_GAMEOVER) {
+                    state = STATE_MENU;
+                }
+            }
+        }
+        if (e.type == SDL_MOUSEBUTTONDOWN) {
+            if (state == STATE_MENU) { state = STATE_PLAYING; reset_game(); }
+            else if (state == STATE_PLAYING) { bird_vel = FLAP_POWER; play_sound(snd_wing); }
+            else { state = STATE_MENU; }
         }
     }
 }
 
-void update() {
-    if (!started || game_over) return;
-
-    bird.velocity += GRAVITY;
-    bird.y += bird.velocity;
-
-    // Collision with ceiling and ground
-    if (bird.y < 0 || bird.y + BIRD_HEIGHT > GROUND_Y) {
-        game_over = true;
+void game_update() {
+    Uint32 now = SDL_GetTicks();
+    
+    // bird animation
+    if (now - last_frame_time > 120) {
+        bird_frame = (bird_frame + 1) % 3;
+        last_frame_time = now;
     }
 
-    for (int i = 0; i < 3; i++) {
+    if (state != STATE_PLAYING) return;
+
+    // bird physics
+    bird_vel += GRAVITY;
+    bird_y += bird_vel;
+
+    // base scroll
+    base_scroll -= PIPE_SPEED;
+    if (base_scroll <= -SCREEN_W) base_scroll = 0;
+
+    // spawn pipes
+    if (now - last_pipe_spawn > PIPE_SPAWN_INTERVAL) {
+        spawn_pipe();
+        last_pipe_spawn = now;
+    }
+
+    // update pipes
+    for (int i=0;i<MAX_PIPES;i++) {
+        if (!pipes[i].active) continue;
         pipes[i].x -= PIPE_SPEED;
 
-        if (pipes[i].x + PIPE_WIDTH < 0) {
-            pipes[i].x = SCREEN_WIDTH + 100;
-            pipes[i].top_height = rand() % 120 + 40;
-            pipes[i].scored = false;
+        if (pipes[i].x < -PIPE_W) {
+            pipes[i].active = false;
         }
 
-        // Collision detection
-        if (bird.x + BIRD_WIDTH - 4 > pipes[i].x && bird.x + 4 < pipes[i].x + PIPE_WIDTH) {
-            if (bird.y + 4 < pipes[i].top_height || bird.y + BIRD_HEIGHT - 4 > pipes[i].top_height + PIPE_GAP) {
-                game_over = true;
-            }
-        }
-
-        if (!pipes[i].scored && pipes[i].x + PIPE_WIDTH < bird.x) {
+        // score
+        if (!pipes[i].scored && pipes[i].x + PIPE_W < BIRD_X) {
             score++;
             pipes[i].scored = true;
+            play_sound(snd_point);
+            if (score > best_score) best_score = score;
         }
+
+        // collision
+        if (check_collision(BIRD_X, bird_y, &pipes[i])) {
+            play_sound(snd_hit);
+            play_sound(snd_die);
+            state = STATE_GAMEOVER;
+            return;
+        }
+    }
+
+    // ground / ceiling collision
+    if (bird_y + BIRD_H >= SCREEN_H - BASE_H || bird_y <= 0) {
+        play_sound(snd_hit);
+        state = STATE_GAMEOVER;
     }
 }
 
-void render_game() {
+void render() {
+    SDL_SetRenderDrawColor(renderer, 112, 197, 206, 255);
     SDL_RenderClear(renderer);
 
-    // Background
-    SDL_RenderCopy(renderer, bg_texture, NULL, NULL);
+    // bg
+    if (tex_bg_day) SDL_RenderCopy(renderer, tex_bg_day, NULL, NULL);
 
-    // Pipes
-    for (int i = 0; i < 3; i++) {
-        // Draw top pipe (cap at bottom of its segment)
-        SDL_Rect top_rect = { (int)pipes[i].x, 0, PIPE_WIDTH, pipes[i].top_height };
-        SDL_RenderCopy(renderer, pipe_top_texture, NULL, &top_rect);
+    // pipes
+    for (int i=0;i<MAX_PIPES;i++) {
+        if (!pipes[i].active) continue;
+        SDL_Rect top_src = {0,0,PIPE_W, (int)pipes[i].gap_y};
+        SDL_Rect top_dst = {(int)pipes[i].x, 0, PIPE_W, (int)pipes[i].gap_y};
+        SDL_Rect bot_src = {0,0,PIPE_W, SCREEN_H};
+        SDL_Rect bot_dst = {(int)pipes[i].x, (int)(pipes[i].gap_y+PIPE_GAP), PIPE_W, SCREEN_H - (int)(pipes[i].gap_y+PIPE_GAP) - BASE_H};
 
-        // Draw bottom pipe (cap at top of its segment)
-        SDL_Rect bottom_rect = { (int)pipes[i].x, pipes[i].top_height + PIPE_GAP, PIPE_WIDTH, GROUND_Y - (pipes[i].top_height + PIPE_GAP) };
-        SDL_RenderCopy(renderer, pipe_bottom_texture, NULL, &bottom_rect);
+        if (tex_pipe_top) SDL_RenderCopy(renderer, tex_pipe_top, NULL, &top_dst);
+        else { SDL_SetRenderDrawColor(renderer, 115, 191, 46, 255); SDL_RenderFillRect(renderer, &top_dst); }
+
+        if (tex_pipe_bottom) SDL_RenderCopy(renderer, tex_pipe_bottom, NULL, &bot_dst);
+        else { SDL_SetRenderDrawColor(renderer, 115, 191, 46, 255); SDL_RenderFillRect(renderer, &bot_dst); }
     }
 
-    // Base
-    SDL_Rect base_rect = { 0, GROUND_Y, SCREEN_WIDTH, SCREEN_HEIGHT - GROUND_Y };
-    SDL_RenderCopy(renderer, base_texture, NULL, &base_rect);
+    // base
+    SDL_Rect base1 = {(int)base_scroll, SCREEN_H - BASE_H, SCREEN_W, BASE_H};
+    SDL_Rect base2 = {(int)base_scroll + SCREEN_W, SCREEN_H - BASE_H, SCREEN_W, BASE_H};
+    if (tex_base) {
+        SDL_RenderCopy(renderer, tex_base, NULL, &base1);
+        SDL_RenderCopy(renderer, tex_base, NULL, &base2);
+    } else {
+        SDL_SetRenderDrawColor(renderer, 222, 216, 149, 255);
+        SDL_RenderFillRect(renderer, &base1);
+        SDL_RenderFillRect(renderer, &base2);
+    }
 
-    // Bird
-    SDL_Rect bird_rect = { (int)bird.x, (int)bird.y, BIRD_WIDTH, BIRD_HEIGHT };
-    float angle = bird.velocity * 5;
+    // bird (rotate based on velocity)
+    SDL_Rect bird_dst = {BIRD_X, (int)bird_y, BIRD_W, BIRD_H};
+    double angle = bird_vel * 3.0; // tilt
     if (angle > 30) angle = 30;
     if (angle < -30) angle = -30;
-    SDL_RenderCopyEx(renderer, bird_texture, NULL, &bird_rect, angle, NULL, SDL_FLIP_NONE);
+    if (tex_bird[bird_frame]) {
+        SDL_RenderCopyEx(renderer, tex_bird[bird_frame], NULL, &bird_dst, angle, NULL, SDL_FLIP_NONE);
+    } else {
+        SDL_SetRenderDrawColor(renderer, 255, 219, 0, 255);
+        SDL_RenderFillRect(renderer, &bird_dst);
+    }
+
+    // UI - score (simple rect for now, you can render with TTF)
+    if (state == STATE_MENU) {
+        // Title - draw simple overlay
+        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawColor(renderer, 0,0,0,120);
+        SDL_Rect overlay = {0, SCREEN_H/2 - 50, SCREEN_W, 100};
+        SDL_RenderFillRect(renderer, &overlay);
+        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+        // In a real KaiOS app, use SDL_ttf to render text
+        // For now, just show bird bouncing
+    }
+
+    // Game over overlay
+    if (state == STATE_GAMEOVER) {
+        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawColor(renderer, 0,0,0,150);
+        SDL_Rect overlay = {0,0,SCREEN_W, SCREEN_H};
+        SDL_RenderFillRect(renderer, &overlay);
+        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+    }
 
     SDL_RenderPresent(renderer);
 }
 
 void main_loop() {
     handle_input();
-    update();
-    render_game();
+    game_update();
+    render();
 }
 
 int main(int argc, char* argv[]) {
     srand(time(NULL));
-    if (SDL_Init(SDL_INIT_VIDEO) < 0) {
-        printf("SDL could not initialize! SDL_Error: %s\n", SDL_GetError());
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0) {
+        printf("SDL_Init failed: %s\n", SDL_GetError());
         return 1;
     }
-
     if (!(IMG_Init(IMG_INIT_PNG) & IMG_INIT_PNG)) {
-        printf("SDL_image could not initialize! SDL_image Error: %s\n", IMG_GetError());
+        printf("IMG_Init failed\n");
+    }
+    if (Mix_OpenAudio(22050, MIX_DEFAULT_FORMAT, 2, 1024) < 0) {
+        printf("Mix_OpenAudio failed, continuing without sound\n");
     }
 
-    window = SDL_CreateWindow("Flappy Bird C", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, SCREEN_WIDTH, SCREEN_HEIGHT, 0);
-    if (!window) {
-        printf("Window could not be created! SDL_Error: %s\n", SDL_GetError());
-        return 1;
-    }
+    window = SDL_CreateWindow("Flappy Bird KaiOS", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, SCREEN_W, SCREEN_H, 0);
+    renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
 
-    // Try hardware acceleration first, fallback to software
-    renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-    if (!renderer) {
-        printf("Warning: Accelerated renderer failed, trying software. Error: %s\n", SDL_GetError());
-        renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
-    }
+    // Load assets - these are your Python-generated PNGs/WAVs
+    tex_bird[0] = load_texture("assets/bird_up.png");
+    tex_bird[1] = load_texture("assets/bird_mid.png");
+    tex_bird[2] = load_texture("assets/bird_down.png");
+    tex_pipe_top = load_texture("assets/pipe_top.png");
+    tex_pipe_bottom = load_texture("assets/pipe_bottom.png");
+    tex_bg_day = load_texture("assets/background_day.png");
+    tex_base = load_texture("assets/base.png");
 
-    if (!renderer) {
-        printf("Renderer could not be created! SDL Error: %s\n", SDL_GetError());
-        return 1;
-    }
+    snd_wing = Mix_LoadWAV("assets/sounds/wing.wav");
+    snd_point = Mix_LoadWAV("assets/sounds/point.wav");
+    snd_hit = Mix_LoadWAV("assets/sounds/hit.wav");
+    snd_die = Mix_LoadWAV("assets/sounds/die.wav");
 
-    load_textures();
-    init_game();
+    reset_game();
+    last_frame_time = SDL_GetTicks();
 
 #ifdef __EMSCRIPTEN__
-    emscripten_set_main_loop(main_loop, 0, 1);
+    emscripten_set_main_loop(main_loop, 60, 1);
 #else
     while (1) {
         main_loop();
-        SDL_Delay(16);
+        SDL_Delay(1000/60);
     }
 #endif
 

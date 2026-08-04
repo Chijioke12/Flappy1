@@ -209,7 +209,180 @@ async function generateAssets() {
     fs.writeFileSync(path.join(assetsDir, asset.name), buffer);
   }
 
-  console.log('High-fidelity assets generated in', assetsDir);
+  console.log('High-fidelity image assets generated in', assetsDir);
+
+  // Generate sounds
+  const soundsDir = path.join(assetsDir, 'sounds');
+  shell.mkdir('-p', soundsDir);
+
+  const SR = 44100;
+
+  function envelope_adsr(n: number, a = 0.01, d = 0.05, s = 0.7, r = 0.1, sr = SR) {
+    const a_n = Math.floor(a * sr);
+    const d_n = Math.floor(d * sr);
+    const r_n = Math.floor(r * sr);
+    const s_n = Math.max(0, n - a_n - d_n - r_n);
+    const env = new Float32Array(n);
+    
+    if (a_n > 0) {
+      for (let i = 0; i < a_n; i++) env[i] = i / a_n;
+    }
+    if (d_n > 0) {
+      for (let i = 0; i < d_n; i++) env[a_n + i] = 1 - (1 - s) * (i / d_n);
+    }
+    for (let i = 0; i < s_n; i++) {
+      env[a_n + d_n + i] = s;
+    }
+    if (r_n > 0) {
+      for (let i = 0; i < r_n; i++) env[a_n + d_n + s_n + i] = s * (1 - i / r_n);
+    }
+    return env;
+  }
+
+  function make_wing(): Float32Array {
+    const dur = 0.12;
+    const n = Math.floor(SR * dur);
+    const audio = new Float32Array(n);
+    let phase = 0;
+    for (let i = 0; i < n; i++) {
+      const t = i / SR;
+      const freq = 250 + (750 - 250) * (t / dur);
+      phase += 2 * Math.PI * freq / SR;
+      const wave = Math.sin(phase);
+      const env = Math.exp(-t * 18) * (1 - Math.exp(-t * 80));
+      audio[i] = wave * env * 0.8;
+    }
+    return audio;
+  }
+
+  function make_point(): Float32Array {
+    const t1_dur = 0.08;
+    const gap_dur = 0.02;
+    const t2_dur = 0.18;
+    
+    const n1 = Math.floor(SR * t1_dur);
+    const nGap = Math.floor(SR * gap_dur);
+    const n2 = Math.floor(SR * t2_dur);
+    
+    const audio = new Float32Array(n1 + nGap + n2);
+    
+    // Tone 1
+    for (let i = 0; i < n1; i++) {
+      const t = i / SR;
+      audio[i] = Math.sin(2 * Math.PI * 800 * t) * Math.exp(-t * 6) * 0.6;
+    }
+    
+    // Tone 2
+    const env = envelope_adsr(n2, 0.005, 0.02, 0.6, 0.08);
+    for (let i = 0; i < n2; i++) {
+      const t = i / SR;
+      const tone2 = Math.sin(2 * Math.PI * 1200 * t) * env[i] + 
+                    0.3 * Math.sin(2 * Math.PI * 2400 * t) * env[i];
+      audio[n1 + nGap + i] = tone2 * 0.6;
+    }
+    return audio;
+  }
+
+  function make_hit(): Float32Array {
+    const dur = 0.25;
+    const n = Math.floor(SR * dur);
+    const audio = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const t = i / SR;
+      const base = Math.sin(2 * Math.PI * 120 * t) * Math.exp(-t * 12) + 
+                   0.4 * Math.sin(2 * Math.PI * 60 * t) * Math.exp(-t * 8);
+      const noise = (Math.random() * 2 - 1) * Math.exp(-t * 30) * 0.5;
+      audio[i] = Math.tanh((base + noise) * 1.5) * 0.8;
+    }
+    return audio;
+  }
+
+  function make_die(): Float32Array {
+    const dur = 0.7;
+    const n = Math.floor(SR * dur);
+    const audio = new Float32Array(n);
+    let phase = 0;
+    const env = envelope_adsr(n, 0.01, 0.1, 0.5, 0.25);
+    for (let i = 0; i < n; i++) {
+      const t = i / SR;
+      const freq = 600 * Math.pow(80 / 600, t / dur);
+      phase += 2 * Math.PI * freq / SR;
+      const sine = Math.sin(phase);
+      const wave = sine + 0.3 * Math.sign(sine);
+      audio[i] = wave * env[i] * Math.exp(-t * 0.5) * 0.7;
+    }
+    return audio;
+  }
+
+  function make_swoosh(): Float32Array {
+    const dur = 0.3;
+    const n = Math.floor(SR * dur);
+    const audio = new Float32Array(n);
+    let phase = 0;
+    for (let i = 0; i < n; i++) {
+      const t = i / SR;
+      const noise = Math.random() * 2 - 1;
+      const freq = 900 + (200 - 900) * (t / dur);
+      phase += 2 * Math.PI * freq / SR;
+      const carrier = Math.sin(phase);
+      const wave = noise * 0.4 + carrier * 0.6;
+      const env = Math.pow(Math.sin(Math.PI * t / dur), 0.8);
+      audio[i] = wave * env * 0.6;
+    }
+    return audio;
+  }
+
+  function saveWav(filePath: string, channelData: Float32Array, sampleRate = 44100) {
+    const numSamples = channelData.length;
+    const bitsPerSample = 16;
+    const numChannels = 1;
+    const bytesPerSample = bitsPerSample / 8;
+    const blockAlign = numChannels * bytesPerSample;
+    const byteRate = sampleRate * blockAlign;
+    const subChunk2Size = numSamples * blockAlign;
+    const chunkSize = 36 + subChunk2Size;
+
+    const buffer = Buffer.alloc(44 + subChunk2Size);
+
+    // RIFF Header
+    buffer.write('RIFF', 0);
+    buffer.writeUInt32LE(chunkSize, 4);
+    buffer.write('WAVE', 8);
+
+    // "fmt " Subchunk
+    buffer.write('fmt ', 12);
+    buffer.writeUInt32LE(16, 16);
+    buffer.writeUInt16LE(1, 20); // PCM
+    buffer.writeUInt16LE(numChannels, 22);
+    buffer.writeUInt32LE(sampleRate, 24);
+    buffer.writeUInt32LE(byteRate, 28);
+    buffer.writeUInt16LE(blockAlign, 32);
+    buffer.writeUInt16LE(bitsPerSample, 34);
+
+    // "data" Subchunk
+    buffer.write('data', 36);
+    buffer.writeUInt32LE(subChunk2Size, 40);
+
+    // PCM values
+    let offset = 44;
+    for (let i = 0; i < numSamples; i++) {
+      const s = Math.max(-1, Math.min(1, channelData[i]));
+      const val = s < 0 ? s * 0x8000 : s * 0x7FFF;
+      buffer.writeInt16LE(Math.floor(val), offset);
+      offset += 2;
+    }
+
+    fs.writeFileSync(filePath, buffer);
+  }
+
+  console.log('Generating mathematical WAV audio assets...');
+  saveWav(path.join(soundsDir, 'wing.wav'), make_wing());
+  saveWav(path.join(soundsDir, 'point.wav'), make_point());
+  saveWav(path.join(soundsDir, 'hit.wav'), make_hit());
+  saveWav(path.join(soundsDir, 'die.wav'), make_die());
+  saveWav(path.join(soundsDir, 'swoosh.wav'), make_swoosh());
+
+  console.log('All high-fidelity graphics and sound assets generated in', assetsDir);
 }
 
 generateAssets().catch(console.error);
